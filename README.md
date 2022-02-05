@@ -5,6 +5,8 @@
 This is a command line implementation that runs on your local computer rather than the original, now defunct [web-based version](http://bamics2.cmbi.ru.nl/websoftware/essentials/essentials_start.php
 ) developed by [Aldert Zomer et al](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0043012). This version was developed using the Essentials source code available [here](https://trac.nbic.nl/essentials/browser).  
 
+Original ESSENTIALS software was distrubted under [GNU Affero General Public License](https://trac.nbic.nl/essentials/wiki/license)
+
 **Some differences from original Essentials software:**
 
 * Command line only. No web browser implementation (yet?).
