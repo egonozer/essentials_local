@@ -1,0 +1,9 @@
+## Version 2.1 ##
+
+essentials.pl
+- Fixed bug where Archive::Zip module still needed to be installed, even if the --zip option was not used
+- Removed remaining calls to "general::error" and replaced them with "die" statements
+- Removed genome.ptt filtering and sorting steps (now handled in rewritten gbk2pttfna3.pl)
+gbk2pttfna3.pl
+- Rewritten to remove BioPerl dependency and to
+- Now produces correctly sorted and filtered .ptt file

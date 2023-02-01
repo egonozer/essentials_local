@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-my $version = "2.0";
+my $version = "2.1";
 
 ## Simplified local version of Essentials that uses external barcode trimmer and sorter in TIS tools
 
@@ -109,7 +109,7 @@ GetOptions(
     'adjust=s'      => \$adjustment,
     'disp=s'        => \$dispersion,
     'smooth=i'      => \$smoothing,
-    'nozip'         => \$usezip, ## default is no zip
+    'zip'           => \$usezip, ## default is no zip
     'full'          => \$usefull ## default is truncated genes
 ) or die $usage;
 
@@ -239,61 +239,8 @@ unlink (<*.error>);
 
 # Parsing genbank
 print "Parsing selected genbank file. \n";
-qx("$perl" "$gbk2fna3" "$genbank" genome.fasta genome_all.ptt 2>> gbk2fna.error);
-
-# sorting ptt file with genes and proteins on genename and then be annotation length
-my @pttdata;
-my @ordered_pttdata;
-open(ALLPTT, "genome_all.ptt") or general::error("Can't open file: genome_all.ptt");
-open (ALLPTT2, "> genome_all_sorted.ptt");
-
-while (<ALLPTT>){
-    chomp;
-    push(@pttdata, $_);
-} 
-
-@ordered_pttdata = sort { (split '\t', $a)[0]  cmp (split '\t', $b)[0] || (length $b  <=> length $a) } @pttdata;
-print ALLPTT2 join( "\n", @ordered_pttdata )."\n";
-close ALLPTT;
-close ALLPTT2;
-
-
-# TODO: get rid of crap below and do the duplicate search on the array.
-my $alllocus;
-my $allstart;
-my $allstop ;
-my $allstrand ;
-my $alllength ;
-my $allpid ;
-my $allgene ;
-my $allproduct ;
-my $alllocusold ;
-my $allpttline;
-my @splitallptt;
-$alllocusold = 0;
-
-open(ALLPTT3, "genome_all_sorted.ptt") or die ("Can't open file: genome_all_sorted.ptt");
-open (PTT, "> genome.ptt");
-
-while (<ALLPTT3>){
-    $allpttline = $_ ;
-    chomp $allpttline ;
-    @splitallptt = split '\t', $allpttline;
-    $alllocus = $splitallptt[0] ;
-    $allstart = $splitallptt[1] ;
-    $allstop = $splitallptt[2] ;
-    $allstrand = $splitallptt[3] ;
-    $alllength =  $splitallptt[4] ;
-    $allpid = $splitallptt[5];
-    $allgene = $splitallptt[6];
-    $allproduct = $splitallptt[7];
-    if ($alllocus ne $alllocusold) {
-        print PTT "$alllocus\t$allstart\t$allstop\t$allstrand\t$alllength\t$allpid\t$allgene\t$allproduct\n";
-    }
-    $alllocusold = $alllocus;
-}
-close PTT;
-close ALLPTT3;
+#qx("$perl" "$gbk2fna3" "$genbank" genome.fasta genome_all.ptt 2>> gbk2fna.error);
+qx("$perl" "$gbk2fna3" "$genbank" genome.fasta genome.ptt 2>> gbk2fna.error);
 
 # Truncate end of genes to filter out function-retaining C-terminal transposon insertions
 truncategenes();
@@ -321,8 +268,10 @@ doStats();
 # zip everything 
 if ($zip eq "Yes") {
     
-    use Archive::Zip qw( :ERROR_CODES :CONSTANTS );
-    
+    #use Archive::Zip qw( :ERROR_CODES :CONSTANTS );
+    require Archive::Zip;
+    Archive::Zip -> import( qw( :ERROR_CODES :CONSTANTS ) );
+
     my $archive = Archive::Zip->new();
     my $dirfile ;
     
@@ -331,7 +280,7 @@ if ($zip eq "Yes") {
     my @files= readdir DIR;
     closedir DIR;
     foreach $dirfile (@files) {if ($dirfile ne "."){if ($dirfile ne ".."){$archive->addFile($dirfile);}}}
-    unless ( $archive->writeToFileNamed($archivefile) == AZ_OK ) {     
+    unless ( $archive->writeToFileNamed($archivefile) == Archive::Zip->AZ_OK ) {     
         die 'write error';
     }
 
@@ -731,7 +680,7 @@ sub doTAannotation {
     # rapidly annotate the insertion site flanking sequences (the wiggle track of the genome) with genes, which positions are annotated in genome.ptt.
     
     open (ANNOTATION, "> $annotation" )	or die("Can't open file: ".$annotation."");
-    print ANNOTATION "counts\tnames\n";
+    print ANNOTATION "counts\tnames\tStart\tStop\tStrand\tLength\tPid\tGene\tProduct\n";
     #open(LOCATIONS, 'genome.ptt') 	or die("Can't open file: genome.ptt"); ## why not $ptt (i.e. truncated.ptt)?
     open(LOCATIONS, $ptt) or die("Can't open file: ".$ptt.""); ## Makes more sense to me. Should only count same sites that would be counted in read files in doTAcounts subroutine.
     open(WIGGLE, "< $wiggle" ) 		or die("Can't open file: ".$wiggle."");
@@ -810,7 +759,7 @@ sub truncategenes {
     my @spliit;
 
     print "Applying gene truncation filter\n";
-    open(PTT, 'genome.ptt') or general::error("Can't open file: genome.ptt");
+    open(PTT, 'genome.ptt') or die "ERROR: Can't open file: genome.ptt\n";
     open (TRUNCATED, "> truncated.ptt");
     while (<PTT>){
         $pttline = $_ ;
@@ -885,7 +834,7 @@ sub countwiggle {
     my $splet2;
     my $totallines = 0;
     my $totaldepth = 0;
-    open(WIGGLEFILE, "< $wigglefile" ) or general::error("Can't open file: ".$wigglefile."");
+    open(WIGGLEFILE, "< $wigglefile" ) or die "ERROR: Can't open file: ".$wigglefile."\n";
     while (<WIGGLEFILE>){
         my $wigglefileline = $_ ;
         chomp $wigglefileline ;

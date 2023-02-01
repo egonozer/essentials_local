@@ -171,8 +171,9 @@ while(nr.x.minima > max.minima) {
     x.minima<- x[index(rxzmin)[coredata(rxzmin)]]
     y.minima<- y[index(rxzmin)[coredata(rxzmin)]]
     nr.x.minima=nrow(as.matrix(x.minima))
-    densityadjust <- densityadjust+0.1
+    densityadjust <- densityadjust + 0.1 
 }
+if (data.type == “essentialgenes”) write.table(round(x.minima,2),“logFC.minima.txt”,row.names = F, col.names = F)
 
 y.range <- max(y)-min(y)
 y.shift <- y.range/20

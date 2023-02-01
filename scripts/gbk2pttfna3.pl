@@ -1,12 +1,7 @@
 #!/usr/bin/env perl -w
 use warnings;
 use strict;
-
-#use fgweb::general::general ;
-#use fgweb::general::numerics ;
-#use fgweb::general::cmd_input ;
-
-use Bio::SeqIO;
+use File::Basename;
 
 # This script takes a GenBank file as input, and produces a
 # Fasta file and a NCBI PTT file (protein table) as output.
@@ -17,6 +12,7 @@ use Bio::SeqIO;
 # Modified by Victor de Jager 17-November 2009 to acomodate exon information instead of full CDS length
 # All exons are written as single entries, but with the same GI and description.
 # These exons should be joined to one protein, either in forward or using the reverse complement
+# Re-written by Egon Ozer 25 January 2023 to remove BioPerl dependency and filter out redundant records.
 
 ########################
 
@@ -41,128 +37,230 @@ $ini{'-sa'}{checkisstring} = 1 ;
 $ini{'-sa'}{mandatory} = 1 ;
  
 #global variables
-
-my @PTTFILE; # will hold all lines for the PTT file.
-my $gbk;
-my @cds;
-my @gene;
-my @trna;
-my @rrna;
-my $seq;
+my @c_seqs;
+my %crecs;
 
 #############################
 
-#sub parseparams {       # shows the usage information if applicable
-#    my $title = "\nBy Victor de Jager [vcitor.de.jager\@nbic.nl]\n\n" ;
-#    
-#    $title   .= "This script takes a GenBank file as input, and produces a Fasta file and PTT annotation file .\n" ;
-#    $title   .= "The following steps are performed:\n" ;
-#    $title   .= "1 Parses the genbank file.\n" ;
-#    $title   .= "2. Creates a Fasta file\n" ;
-#    $title   .= "3. Creates a PTT file\n" ;
-#    cmd_input::check_cmd_input(\%ini, \@ARGV,$title) ;
-#    
-#    general::error('GenBank file does not exist') if ($ini{'-gbk'}{val} ne '' and !-e $ini{'-gbk'}{val}) ;
-#    general::error('An output ptt file is mandatory') if ($ini{'-sa'}{val} eq '');
-#    general::error('An output fasta file is mandatory') if ($ini{'-s'}{val} eq '');
-#
-#} # parseparams
+sub gbk_convert{
+    my $file = shift;
+    my $return_status = 0;
+    my $shortfile = basename($file);
+    return(1) unless -e $file;
+    my $gbkin;
+    if ($file =~ m/\.gz$/){
+        open ($gbkin, "gzip -cd $file | ") or return(1);
+    } else {
+        return(5) if -B $file;
+        open ($gbkin, "<", $file) or return(1);
+    }
+    my $loccount = 0;
+    my $seqcount = 0;
+    my ($c_id, $c_seq);
+    my $is_prod;
+    my @tags = ("-") x 6;
+    my @ptags;
+    my @ctg_order;
+    my $reading = 1; # 1 = front material, 2 = annotations, 3 = sequence
+
+    while (my $fline = <$gbkin>){
+        $fline =~ s/\R/\012/g; #converts to UNIX-style line endings
+        my @lines = split("\n", $fline); #need to split lines by line-ending character in the case of Mac-formatted files which only have CR line terminators, not both CR and LF like DOS
+        while (@lines){
+            my $line = shift @lines;
+            next if $line =~ m/^\s*$/;
+            if ($line =~ m/^LOCUS\s+\S*\s+\d+\sbp/){
+                if ($reading == 2){ #no ORIGIN sequence record was found between LOCUS records
+                    return (2);
+                }
+                if ($reading == 3){ #this shouldn't happen. Should see a `//` between records 
+                    if ($c_seq and $c_id){
+                        push @c_seqs, ([$c_id, $c_seq]);
+                        $c_seq = "";
+                        $reading = 1;
+                        print "More than one sequence record found in gbk file. Only using first sequence.\n";
+                        return(0); ### Added this to only use the first sequence record in the file, similar to prior essentials/gbk2pttfna behavior.
+                    } else {
+                        return (2);
+                    }
+                }
+            }
+            if ($line =~ m/^\/\//){ #reached the end of the file (or record)
+                if ($c_seq and $c_id){
+                    push @c_seqs, ([$c_id, $c_seq]);
+                    $c_seq = "";
+                    $reading = 1;
+                    return(0); ### Added this to only use the first sequence record in the file, similar to prior essentials/gbk2pttfna behavior.
+                } else {
+                    return (2);
+                }
+            }
+            if ($reading == 1){
+                if ($line =~ m/^LOCUS\s+([^\s]+)/){
+                    $seqcount++;
+                    if ($line =~ m/^LOCUS\s+(\S+)\s+\d+ bp/){
+                        $c_id = $1;
+                    } else {
+                        $c_id = "rec$seqcount";
+                    }
+                    push @ctg_order, $c_id;
+                    next;
+                }
+                if ($line =~ m/^FEATURES\s+Location\/Qualifiers/){
+                    $reading = 2;
+                    next;
+                }
+            } elsif ($reading == 2){
+                if ($line =~ m/^\s+(\S+)\s+(complement\()*[<>]*(\d+)<*\.\.[<>]*(\d+)>*\)*\s*$/){
+                    $is_prod = "";
+                    my ($type, $start, $stop) = ($1, $3, $4);
+                    my $dir = "+";
+                    $dir = "-" if $2;
+                    unless ($type eq "source" or $type eq "gene" or $crecs{$c_id}{$start}{$stop}{$dir}){
+                        @{$crecs{$c_id}{$start}{$stop}{$dir}} = ($type);
+                    }
+                    if ($type eq "CDS"){
+                        $loccount++;
+                    }
+                    if ($ptags[0]){
+                        while (@ptags){
+                            my ($o_start, $o_stop, $o_dir) = (shift @ptags, shift @ptags, shift @ptags);
+                            #if ($tags[5] eq "p"){ ## skip pseudogenes (or not, I guess)
+                            #    delete($crecs{$c_id}{$o_start}{$o_stop}{$o_dir});
+                            #} else {
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[1] = $tags[0];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[2] = $tags[1];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[3] = $tags[2];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[4] = $tags[3];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[5] = $tags[4];
+                                $loccount++;
+                            #}
+                        }
+                        @tags = ("-") x 6
+                    }
+                    @ptags = ($start, $stop, $dir);
+                    if ($type eq "source" or $type eq "gene"){
+                        undef @ptags;
+                        @tags = ("-") x 6
+                    }
+                    next;
+                }
+
+                ## Handle split genes. Could either ignore, provide with suffixes, or ignore "introns" and just take
+                ## the first and last coordinates in the set as start and stop (this is the old behavior of gbk2pttfna3)  
+                ## Including (with suffixes) will be afffected by truncation, i.e. each "exon" will be 3' truncated 
+                ## rather than just the end of the gene sequence.
+                ## Will use first and last coordinates as start & stop.
+                if ($line =~ m/^\s+(\S+)\s+(complement)*\S*join\(([<>]*\d+<*\.\.[<>]*\d+>*,[^\)]+)\)\S*\s*$/){
+                    $is_prod = "";
+                    my ($type, $coords) = ($1, $3);
+                    my $dir = "+";
+                    $dir = "-" if $2;
+                    $coords =~ m/^(\d+).*\.(\d+)$/;
+                    my ($start, $stop) = ($1,$2);
+                    unless ($type eq "source" or $type eq "gene" or $crecs{$c_id}{$start}{$stop}{$dir}){
+                        @{$crecs{$c_id}{$start}{$stop}{$dir}} = ($type);
+                    }
+                    if ($type eq "CDS"){
+                        $loccount++;
+                    }
+                    if ($ptags[0]){
+                        while (@ptags){
+                            my ($o_start, $o_stop, $o_dir) = (shift @ptags, shift @ptags, shift @ptags);
+                            #if ($tags[5] eq "p"){ ## skip pseudogenes (or not, I guess)
+                            #    delete($crecs{$c_id}{$o_start}{$o_stop}{$o_dir});
+                            #} else {
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[1] = $tags[0];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[2] = $tags[1];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[3] = $tags[2];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[4] = $tags[3];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[5] = $tags[4];
+                                $loccount++;
+                            #}
+                        }
+                        @tags = ("-") x 6
+                    }
+                    @ptags = ($start, $stop, $dir);
+                    if ($type eq "source" or $type eq "gene"){
+                        undef @ptags;
+                        @tags = ("-") x 6
+                    }
+                    next;
+                }
 
 
-sub tag {
-   my($f, $tag) = @_;
-   return '-' unless $f->has_tag($tag);
-   return join(' ', $f->get_tag_values($tag));
-}
-
-sub create_header {
-	my $seq = shift;
-	my $cds = shift;
-	my $pttfile = shift;
-	
-#	push (@PTTFILE, $seq->description." - 0..".$seq->length."\n") ;
-#	push (@PTTFILE, scalar(@{$cds})." proteins\n");
-	push (@PTTFILE, join("\t", qw(!Locus Start Stop Strand Length PID Gene Product))."\n") ;
-	
-}
-sub parse_cds{
-	my $cds=shift;
-
-	for my $f (@{$cds}) {
-    	my $gi = '-';
-    	$gi = $1 if tag($f, 'db_xref') =~ m/\bGI:(\d+)\b/;
-    	my $cog = '-';
-    	$cog = $1 if tag($f, 'product') =~ m/^(COG\S+)/;
-    	my $start;
-    	my $end;
-    	my $strand;
-    	my $pttline;
-   
-    	#Test whether the cds is a split location
-   
-    	if ( $f->location->isa('Bio::Location::SplitLocationI')){
-			#ignoring join() features.	
-			for my $loc ( $f->location->sub_Location ) {
-    			$start=$loc->start;
-    			$end= $loc->end;
-  		        #&create_columns($f,$start,$end,$gi,$cog);
-  			}
-		
-   	 	}
-   	 	else {
-   			#We are dealing with a simple feature
-   			$start=$f->start;
-    			$end= $f->end;
-   			&create_columns($f,$start,$end,$gi,$cog);
-   		}		
-   	 
-	}
-}
-
-sub create_columns {
-	
-	my $f=shift;
-	my $start=shift;
-	my $end = shift;
-	my $gi = shift;
-	my $cog = shift;
-	;
-	
-	my @col = (
-     
-     tag($f, 'locus_tag'),
-     $start,
-     $end,
-     $f->strand >= 0 ? '+' : '-',
-     (int(($f->length))),
-     $gi,
-     tag($f, 'gene'),
-     tag($f, 'product'),
-   );
-   my $col = join("\t", @col);
-   push (@PTTFILE,$col."\n"); 
-}
-
-sub write_ptt{
-	
-	my $file = shift;
-	#open PTT,">$file" or general::error('Cannot create PTT file');
-    open PTT,">$file" or die "Cannot create PTT file";
-	
-	for my $ptt (@PTTFILE){
-		print PTT $ptt;
-	}
-	close(PTT);
-}
-
-sub write_fna{
-	
-	my $file = shift;
-	my $seq = shift;
-	my $fna = Bio::SeqIO->new( -file=> ">$file",
-							   -format=>'fasta');
-	$fna->write_seq($seq);
-	
+                if ($line =~ m/^ORIGIN\s*$/){
+                    $is_prod = "";
+                    if ($ptags[0]){
+                        while (@ptags){
+                            my ($o_start, $o_stop, $o_dir) = (shift @ptags, shift @ptags, shift @ptags);
+                            #if ($tags[5] eq "p"){ ## skip pseudogenes (or not, I guess)
+                            #    delete($crecs{$c_id}{$o_start}{$o_stop}{$o_dir});
+                            #} else {
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[1] = $tags[0];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[2] = $tags[1];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[3] = $tags[2];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[4] = $tags[3];
+                                ${$crecs{$c_id}{$o_start}{$o_stop}{$o_dir}}[5] = $tags[4];
+                                $loccount++;
+                            #}
+                        }
+                    }
+                    undef @ptags;
+                    @tags = ("-") x 6;
+                    $reading = 3;
+                    next
+                }
+                ## tags: [0]=locus_tag, [1]=product, [2]=gene, [3]=gi, [4]=cog, [5]=pseudo
+                if ($line =~ m/^\s+\/(\S+)=\"*([^"]*)\"*/){
+                    $is_prod = "";
+                    my ($key, $val) = ($1, $2);
+                    if ($key eq "locus_tag"){
+                        $tags[0] = $val;
+                    }
+                    if ($key eq "product"){
+                        $tags[1] = $val;
+                        $is_prod = 1;
+                        $tags[4] = $1 if $val =~ m/^(COG\S+)/;
+                    }
+                    if ($key eq "gene"){
+                        $tags[2] = $val;
+                    }
+                    if ($key eq "db_xref"){
+                        my $gi = $1 if $val =~ m/\bGI:(\d+)\b/;
+                        if ($gi){
+                            if ($tags[3] eq "-"){
+                                $tags[3] = $gi;
+                            } else {
+                                $tags[3] .= ",$gi";
+                            }
+                        }
+                    }
+                    next;
+                }
+                if ($line =~ m/^\s+\/pseudo\s*$/){
+                    $tags[5] = "p";
+                }
+                if ($is_prod){
+                    $line =~ s/^\s*//;
+                    $line =~ s/"*\s*$//;
+                    $tags[1] .= " $line";
+                }
+            } elsif ($reading == 3){
+                $line =~ s/\d//g;
+                $line =~ s/\s//g;
+                $c_seq .= $line;
+                next;
+            }
+        }
+    }
+    if ($c_seq and $c_id){
+        push @c_seqs, ([$c_id, $c_seq]);
+        $c_seq = "";
+        $reading = 1;
+    }
+    close ($gbkin);
+    return(0);
 }
 
 #################################
@@ -184,21 +282,42 @@ $ini{'-gbk'}{val} = $ARGV[0];
 $ini{'-s'}{val} = $ARGV[1];
 $ini{'-sa'}{val} = $ARGV[2];
 
-$gbk = Bio::SeqIO->new(	-file=> $ini{'-gbk'}{val},
-							-format=>'genbank');
-$seq = $gbk->next_seq;
-@cds = grep { $_->primary_tag eq 'CDS' } $seq->get_SeqFeatures;
-@trna = grep { $_->primary_tag eq 'tRNA' } $seq->get_SeqFeatures;
-@rrna = grep { $_->primary_tag eq 'rRNA' } $seq->get_SeqFeatures;
-@gene = grep { $_->primary_tag eq 'gene' } $seq->get_SeqFeatures;
+## read in genbank file
+my $status = gbk_convert($ini{'-gbk'}{val});
+die "ERROR: $0 died with status $status\n" if $status;
 
-push (@cds, @trna);
-push (@cds, @rrna);
-push (@cds, @gene);
+## output PTT
+open (my $ptt,">$ini{'-sa'}{val}") or die "Cannot create PTT file";
+print $ptt join("\t", qw(!Locus Start Stop Strand Length PID Gene Product))."\n";
+my %seen_lid;
+foreach my $contig (sort keys %crecs){
+    foreach my $start (sort {$a <=> $b} keys %{$crecs{$contig}}){
+        foreach my $stop (sort {$a <=> $b} keys %{$crecs{$contig}{$start}}){
+            foreach my $dir (sort keys %{$crecs{$contig}{$start}{$stop}}){
+                my ($type, $lid, $prod, $gene, $gi, $cog) = @{$crecs{$contig}{$start}{$stop}{$dir}};
+                my $length = ($stop - $start) + 1;
+                next if ($length < 0); ## the only time this should happen is if a gene spans the end / beginning of the sequence. Safest to just ignore.
+                unless($lid){
+                    print STDERR "$start, $stop, $dir\n";
+                }
+                unless ($lid eq "-" or $seen_lid{$lid}){
+                    print $ptt "$lid\t$start\t$stop\t$dir\t$length\t$gi\t$gene\t$prod\n";
+                }
+                $seen_lid{$lid} = 1;
+            }
+        }
+    }
+}
+close ($ptt);
 
-&create_header($seq,\@cds);
-&parse_cds(\@cds);
-&write_ptt($ini{'-sa'}{val});
-&write_fna($ini{'-s'}{val}, $seq);
+## output fasta
+open (my $fa, ">$ini{'-s'}{val}") or die "Cannot create fasta file";
+print $fa ">$c_seqs[0][0]\n";
+my $seqleng = length($c_seqs[0][1]);
+for (my $j = 0; $j < $seqleng; $j += 60){
+    my $segment = uc(substr($c_seqs[0][1], $j, 60));
+    print $fa "$segment\n";
+}
+
 
 
