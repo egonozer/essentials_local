@@ -1,3 +1,24 @@
+## Version 2.2 ##
+
+essentials.pl
+  - Combine counts from both insertion site flanks prior to loess normalization and other downstream steps
+  - Fixed bug where 'ta_XX.wiggle' files would turn negative loess-adjusted counts to positive. Instead stops with warning message if negative counts are encountered  
+  - Default library size (-l/--libsize) set to '0', i.e. no site filtering
+  - Include pool names in targets files so edgeR can include these in PCA & MDS plots
+  - Remove smoothing (--smooth) from listed Essentials options. The newer versions of edgeR no longer require this value for calculation of prior degrees of freedom. 
+  - Remove no repeat (--norepeat) option as this no longer has any function 
+edgeR.R
+  - Removed prior.df calculation for dispersion estimates. Per edgeR documentation, prior.df is automatically calcuated by the estimateDisp function.
+  - Added percent variance explained to axis labels in PCA plots
+  - Output pool names in PCA and MDS plots instead of pool numbers
+loess.R
+  - Perform outlier removal (+/- 3x IQR) prior to loess normalization
+  - Outputs .png files for each counts file showing raw read counts, loess smooth line, and loess-adjusted read counts
+loess_genes.R
+  - Perform outlier removal (+/- 3x IQR) and removal of 0 counts prior to loess normalization
+  - Outputs .png files for each gene_counts file showing per-gene read counts, loess smooth line, and loess-adjusted read counts
+
+
 ## Version 2.1 ##
 
 essentials.pl

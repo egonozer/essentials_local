@@ -17,13 +17,22 @@ smooth.val <- Args[4]
 stat.type <- Args[5]
 data.type <- Args[6]
 
+write("---------------", stderr())
+write(paste0("Data (data.type): ", data.type), stderr())
+write(paste0("Normalization Method (norm.type): ", norm.type), stderr())
+write(paste0("p-value Adjustment (adj.type): ", adj.type), stderr())
+write(paste0("Dispersion (disp.type): ", disp.type), stderr())
+write(paste0("Analysis (stat.type): ", stat.type), stderr())
+write("---------------", stderr())
+
 targets <- read.delim(file = paste(data.type, "_targets.txt", sep=""), stringsAsFactors = FALSE) 
-d <- readDGE(targets, columns=c(2,1))
+d <- readDGE(targets, columns=c(2,1), labels=targets$label)
 d$counts <- round(d$counts)
 if (data.type == "gene") d <- d[rowSums(d$counts) > 10*nrow(targets)-1, ]
 if (data.type == "essentialgenes") d <- d[rowSums(d$counts) > 10, ]
 counts.old <- d$counts
 d$counts <- d$counts+1
+if (data.type == "ta") d <- d[rowSums(d$counts) > 2*nrow(targets), ]
 ## !!!! The following step is not originally performed by Essentials (not sure why).
 ## It updates the library size after the rounding and filtering step.
 d$samples$lib.size <- colSums(d$counts)
@@ -33,12 +42,14 @@ if (data.type == "essentialgenes") title.text = "measured and expected counts"
 if (data.type == "ta") title.text = "ta sites"
 if (nrow(targets) >2){
     p3 <- prcomp(d$counts)
+    summ <- summary(p3)
+    pc1var <- summ$importance[2,1] * 100
+    pc2var <- summ$importance[2,2] * 100
     png(paste(data.type, '_PCA_non_normalized.png', sep=""), width=1280, height=1024)
-    biplot(p3, cex=1:2, col=c(40,1), main=paste('PCA Plot non normalized on',title.text, sep=" "))
+    biplot(p3, cex=1:2, col=c(40,1), main=paste('PCA Plot non normalized on',title.text, sep=" "), xlab=paste0("PC1 (",pc1var,"%)"), ylab=paste0("PC2 (",pc2var,"%)"))
     dev.off()
     png(paste(data.type,'_MDS_non_normalized.png', sep=""), width=960, height=768)
     plotMDS(d, col=as.numeric(d$samples$group), main=paste("MDS Plot non normalized on", title.text, sep=" "))
-    legend("bottomleft", as.character(unique(d$samples$group)), col=1:nlevels(d$samples$group), pch=20)
     dev.off()
 } else {
     png(paste(data.type, '_PCA_non_normalized.png', sep=""), width=1280, height=1024)
@@ -56,12 +67,14 @@ d <- estimateCommonDisp(d)
 
 if (nrow(targets) >2){
     p3 <- prcomp(d$pseudo.counts)
+    summ <- summary(p3)
+    pc1var <- summ$importance[2,1] * 100
+    pc2var <- summ$importance[2,2] * 100
     png(paste(data.type,'_PCA_normalized.png', sep=""), width=1280, height=1024)
-    biplot(p3, cex=1:2, col=c(40,1), main=paste('PCA Plot normalized on', title.text, sep=" "))
+    biplot(p3, cex=1:2, col=c(40,1), main=paste('PCA Plot normalized on', title.text, sep=" "), xlab=paste0("PC1 (",pc1var,"%)"), ylab=paste0("PC2 (",pc2var,"%)"))
     dev.off()
     png(paste(data.type,'_MDS_normalized.png', sep=""), width=960, height=768)
     plotMDS(d, col=as.numeric(d$samples$group), main=paste("MDS Plot normalized on", title.text, sep=" "))
-    legend("bottomleft", as.character(unique(d$samples$group)), col=1:nlevels(d$samples$group), pch=20)
     dev.off()
 } else {
     png(paste(data.type,'_PCA_normalized.png', sep=""), width=1280, height=1024)
@@ -69,11 +82,6 @@ if (nrow(targets) >2){
     title("three samples needed for PCA. x-y plot generated")
     dev.off()
 }
-                    
-#calculate prior.df for new version of edgeR, which no longer accepts prior.n
-#residual.df = #samples - #groups
-#prior.df = residual.df * prior.n
-pdf = (nrow(targets) - nlevels(d$samples$group)) * as.numeric(smooth.val)
 
 if (stat.type == "qCML" || data.type == "essentialgenes"){
     if (data.type == "essentialgenes"){
@@ -81,10 +89,9 @@ if (stat.type == "qCML" || data.type == "essentialgenes"){
     } else {
         disp.trend = "none"
     }
-    disp.trend 
     if (disp.type == "tagwise"){
         if (nrow(targets) >2){
-            d <- estimateTagwiseDisp(d, prior.df=pdf, trend=disp.trend)
+            d <- estimateDisp(d, trend.method=disp.trend, tagwise=T)
             de.tagwise <-exactTest(d, dispersion="tagwise")
         } else {
             de.tagwise <-exactTest(d, dispersion="common")
@@ -92,9 +99,8 @@ if (stat.type == "qCML" || data.type == "essentialgenes"){
     }
     if (disp.type == "common") de.tagwise <-exactTest(d, dispersion="common")
 } else {
-    design <- model.matrix(~ group, data = targets)
-    colnames(design) <- levels(d$samples$group) ## probably not necessary    
-    d <- estimateDisp(d, design, prior.df=pdf, method="trend")
+    design <- model.matrix(~ group, data = targets)   
+    d <- estimateDisp(d, design)
     if (disp.type == "common")  glmfit.tgw <- glmFit(d, design, dispersion = d$trended.dispersion)
     if (disp.type == "tagwise") glmfit.tgw <- glmFit(d, design, dispersion = d$tagwise.dispersion)
     de.tagwise <- glmLRT(glmfit.tgw)
@@ -173,7 +179,7 @@ while(nr.x.minima > max.minima) {
     nr.x.minima=nrow(as.matrix(x.minima))
     densityadjust <- densityadjust + 0.1 
 }
-if (data.type == “essentialgenes”) write.table(round(x.minima,2),“logFC.minima.txt”,row.names = F, col.names = F)
+if (data.type == "essentialgenes") write.table(round(x.minima,2),"logFC.minima.txt",row.names = F, col.names = F)
 
 y.range <- max(y)-min(y)
 y.shift <- y.range/20

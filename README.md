@@ -12,10 +12,13 @@ Original ESSENTIALS software was distrubted under [GNU Affero General Public Lic
 * Command line only. No web browser implementation (yet?).
 * This version does not perform read demultiplexing, trimming, or alignment. Inputs to essentials\_local are wiggle files listing sequence positions and read counts. To peform read processing from fastq read files to generate input for essentials\_local, you can / shoud use the scripts available at [TIS_tools](https://github.com/egonozer/TIS_tools) depending on what sequencing library protocol you used.
 * Currently only TA insertion libraries can be used in this version of essentials\_local. Random insertion libraries are not yet implemented.
-* We added some new figure outputs to the pipeline. In addition to the PCA plots, density plots, and fold-change vs signal plots output by original Essentials, this version also outputs MDS and volcano plots, both of which we've found useful in our analyses
+* We added some new figure outputs to the pipeline. In addition to the PCA plots, density plots, and fold-change vs signal plots output by original Essentials, this version also outputs MDS and volcano plots, both of which we've found useful in our analyses, as well as plots of read counts per insertion site (TA) and per gene 
+before and after loess normalization. 
 * Removed multi-library support from the Cox-Reid (CR) analysis option. It was confusingly implemented (to me anyway) and very prone to error if the libraries were not perfectly defined in the input. Would not be too tough to re-integrate if needed, but we have not needed it. 
-* Updated to use most recent generation of EdgeR v3.x (currently v3.14)
+* Updated to use most recent generation of EdgeR v3.x+ (currently v4.x)
 * Removed dependency on 'pass' aligner for identifying unique insertion sites, replaced with Perl script.
+* Other changes can be found in the CHANGELOG.txt
+
 
 **Requirements:** 
    
@@ -24,12 +27,12 @@ Original ESSENTIALS software was distrubted under [GNU Affero General Public Lic
 
 **Installation:**  
 
-* Install packages (EdgeR, EnhancedVolcano, zoo) in R: 
+* Install packages (edgeR, EnhancedVolcano, zoo) in R: 
 
 ```r
 if (!requireNamespace('BiocManager', quietly = TRUE))
     install.packages('BiocManager')        
-BiocManager::install('EdgeR')
+BiocManager::install('edgeR')
 BiocManager::install('EnhancedVolcano')
 install.packages('zoo')
 ```
@@ -58,14 +61,14 @@ Required:
                     genbank file path this can be omitted and will be ignored
 
 Optional:
-  -l or --libsize   Expected library size (default: 15000)
+  -l or --libsize   Expected library size. Enter 0 to use all sites in each 
+                    input wiggle file (default: 0)
   --rdleng          Expected length of reads used for alignment. Options:
                     24 = Boll protocol (default)
                     17 = Goodman protocol
   --insert          Transposon insertion site type. Options are:
                     'TA' (default) or 'random' (NONFUNCTIONAL)                    
   --full            Use full gene lengths (default: use 5' truncated genes)
-  --norepeat        Do not count repeats (default: repeats are counted)
   --noloess         Skip loess normalization of intra-pool read counts
                     (default: loess normalization is performed)
   --norm            Normalization method across pools. Options are:
@@ -80,7 +83,6 @@ Optional:
                     'CR' = Cox-Reid profile-adjusted likelihood
   --disp            Dispersion estimates. Options are:
                     'tagwise' (default) or 'common'
-  --smooth          Smoothing factor. (default: 5)
   --adjust          p-value adjustment. Options are:
                     'BH' (default), 'holm', 'hochberg', 'hommel', 'bonferroni',
                     'BY', or 'none'

@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-my $version = "2.1";
+my $version = "2.2";
 
 ## Simplified local version of Essentials that uses external barcode trimmer and sorter in TIS tools
 
@@ -21,7 +21,7 @@ my $scriptpath = dirname(__FILE__);
 ## Set defaults
 my $insertion           = "TA";
 my $normalization       = "TMM";
-my $librarysize         = "15000"; ## Remember this needs to be multipled by 2 later
+my $librarysize         = 0; 
 my $statmethod          = "qCML";
 my $loess               = "Yes";
 my $adjustment          = "BH";
@@ -30,13 +30,12 @@ my $smoothing           = 5;
 my $ptt                 = "truncated.ptt";
 my $zip                 = "No";
 my $tasitelength        = 24; #mode read length. 17 for Goodman, 24 for Boll 
-my $repeat              = "Yes"; ## This is not used anymore. Was used to determine the "-uniq" setting for pass aligner. I think unsetting it was a way to bypass removing non-unique TA site flanks, though why?
 
 my $usage = "
 essentials.pl
 
 Required:
-  -c or --config    Path to configuration file. Should contain path to read count
+  -c or --config    Configuration file. Should contain paths to read count
                     files in wiggle format (as output by INSeq_read_preprocess.pl)
                     group, and ID, separated by tabs. Group can be anything you
                     want to separate two groups to be compared, usually 'control'
@@ -51,14 +50,14 @@ Required:
                     genbank file path this can be omitted and will be ignored
 
 Optional:
-  -l or --libsize   Expected library size (default: $librarysize)
+  -l or --libsize   Expected library size. Enter 0 for no size limit. 
+                    (default: $librarysize)
   --rdleng          Expected length of reads used for alignment. Options:
                     24 = Boll protocol (default)
                     17 = Goodman protocol
   --insert          Transposon insertion site type. Options are:
                     'TA' (default) or 'random' (NONFUNCTIONAL)
   --full            Use full gene lengths (default: use 5' truncated genes)
-  --norepeat        Do not count repeats (default: repeats are counted)
   --noloess         Skip loess normalization of intra-pool read counts
                     (default: loess normalization is performed)
   --norm            Normalization method across pools. Options are:
@@ -73,7 +72,6 @@ Optional:
                     'CR' = Cox-Reid profile-adjusted likelihood
   --disp            Dispersion estimates. Options are:
                     'tagwise' (default) or 'common'
-  --smooth          Smoothing factor. (default: $smoothing)
   --adjust          p-value adjustment. Options are:
                     'BH' (default), 'holm', 'hochberg', 'hommel', 'bonferroni',
                     'BY', or 'none'
@@ -141,7 +139,6 @@ if ($settingsfile){
             $smoothing = $val if $type eq 'SMOOTHING';
             $ptt = $val if $type eq 'GENETRUNCATION';
             $loess = $val if $type eq 'LOESS';
-            $repeat = $val if $type eq 'REPEAT';
             $minomicsreads = $val if $type eq 'MINOMICSREADS';
             $zip = $val if $type eq 'DOZIP';
         }
@@ -350,6 +347,7 @@ sub get_and_convert {
         next if ($inputlink eq "");
         next if ($inputlink eq " ");
         $samplecount = $samplecount + 1;
+        $samplename = "sample${samplecount}" unless $samplename;
 
         $filecount = $filecount +1;
         
@@ -373,8 +371,9 @@ sub get_and_convert {
         #create samplename file for later use
         if ($sampletype ne "ignore") {
             open (SAMPLENAME, ">> samplenames.txt");
-            if ($samplename ne "") {print SAMPLENAME "".$samplename."_".$samplecount."_".$sampletype."\n";}
-            if ($samplename eq "") {print SAMPLENAME "sample".$samplecount."_".$sampletype."\n";}
+            print SAMPLENAME "".$samplename."_".$samplecount."_".$sampletype."\n";
+            #if ($samplename ne "") {print SAMPLENAME "".$samplename."_".$samplecount."_".$sampletype."\n";}
+            #if ($samplename eq "") {print SAMPLENAME "sample".$samplecount."_".$sampletype."\n";}
             close (SAMPLENAME);
         }
         
@@ -382,18 +381,18 @@ sub get_and_convert {
         if ($sampletype ne "ignore") {
             my $countsgene = "gene_".$sample.".counts.txt";
             open (TARGETSGENES, ">> gene_targets.txt");
-            print TARGETSGENES "".$countsgene."\t".$sampletype."\t".$sampletype."\t".$library."\n";
+            print TARGETSGENES "".$countsgene."\t".$sampletype."\t".$sampletype."\t".$library."\t".$samplename."\n";
             close (TARGETSGENES);
             
             #add sample to file with all samples as control samples for essential genes edgeR
             open (TARGETSESSENTIALGENES, ">> essentialgenes_targets.txt");
-            print TARGETSESSENTIALGENES "".$countsgene."\ttarget\ttarget\t".$library."\n";
+            print TARGETSESSENTIALGENES "".$countsgene."\ttarget\ttarget\t".$library."\t".$samplename."\n";
             close (TARGETSESSENTIALGENES);
             
             #add sample to file with control and target samples for insertion site edgeR
             my $tacounts = "ta_".$sample.".counts.txt";
             open (TARGETSTA, ">> ta_targets.txt");
-            print TARGETSTA "".$tacounts."\t".$sampletype."\t".$sampletype."\t".$library."\n";
+            print TARGETSTA "".$tacounts."\t".$sampletype."\t".$sampletype."\t".$library."\t".$samplename."\n";
             close (TARGETSTA);
             push(@samples, $sample);
         }
@@ -419,15 +418,15 @@ sub get_and_convert {
 sub writeheaders {
     #create initial gene_targets.txt readDGE object input file
     open (TARGETSGENE, '>gene_targets.txt');
-    print TARGETSGENE "files \t group \t description \t library \n";
+    print TARGETSGENE "files \t group \t description \t library \t label \n";
     close (TARGETSGENE);
     #create initial essentialgenes_targets.txt readDGE object input file
     open (TARGETSESSENTIALGENES, '>essentialgenes_targets.txt');
-    print TARGETSESSENTIALGENES "files \t group \t description \t library \n";
+    print TARGETSESSENTIALGENES "files \t group \t description \t library \t label \n";
     close (TARGETSESSENTIALGENES);
     #create initial ta_targets.txt readDGE object input file
     open (TARGETSTA, '>ta_targets.txt');
-    print TARGETSTA "files \t group \t description \t library \n";
+    print TARGETSTA "files \t group \t description \t library \t label \n";
     close (TARGETSTA);
 }# END writeheaders
 
@@ -455,12 +454,36 @@ sub pass_alignments {
         stat ($alltacounts);
         unless (-e _){die "sample ".$sample.".fasta was not created and wiggle file ".$alltacounts." was not found either.\n"}
 
+        print "\n";
         countwiggle($alltacounts);
-        print "Retaining only the $librarysize insertion site flanking sequences with the highest numbers of reads\n";
+        if ($librarysize == 0){
+            print "Retaining all insertion sizte flanking sequences\n";
+        } else {
+            print "Retaining only the $librarysize insertion site flanking sequences with the highest numbers of reads\n";
+        }
         
-        ## Sort read counts at TA sites from highest to lowest and keep first '$librarysize' sites
-        qx("$cat" "$alltacounts" |"$sort" -n -r |head -n "$librarysize" > "$tacounts");
+        ## Sort read counts at TA sites from highest to lowest and keep first '$librarysize' sites (unless $librarysize is 0)
+        if ($librarysize == 0){
+            qx("$cat" "$alltacounts" | "$sort" -n -r > "$tacounts");
+        } else {
+            qx("$cat" "$alltacounts" |"$sort" -n -r |head -n "$librarysize" > "$tacounts");
+        }
         
+        ## Combine reads from insertion site flanks
+        open (my $in, "<$tacounts") or die "ERROR Can't open $tacounts for reading: $!\n";
+        my %hash;
+        while (my $line = <$in>){
+            chomp $line;
+            my ($count, $site) = split("\t", $line);
+            $hash{abs($site)}+=$count;
+        }
+        close ($in);
+        open (my $out, ">$tacounts") or die "ERROr: Can't open $tacounts for writing: $!\n";
+        foreach my $site (sort{$a <=> $b} keys %hash){
+            print $out "$hash{$site}\t$site\n";
+        }
+        close ($out);
+
         ## Loess normalize the per-site read counts. Overwrites the input file of top raw read counts (ta_XXX.counts.txt)
     	if ($loess eq "Yes") {
             print "Loess normalizing ".$tacounts." for read count bias\n";
@@ -469,8 +492,23 @@ sub pass_alignments {
     	                                                         
     	## Add the normalized read counts to a file containing normalized read counts from all the read pools in the analysis.  
         qx("$cat" "$tacounts" >>allinsertions.txt);
-        ## This removes headers, removes - signs on positions, and sorts by site. Leave this here in case loess normalization is not performed. Otherwise unnecessary,  
-        qx("$cat" "$tacounts" |"$grep" -v names|"$tr" -d '-'|"$sort" -n -k2 >$wiggle);
+        ## This removes headers, removes - signs on positions, and sorts by site. 
+        open ($in, "<$tacounts") or die "ERROR: Can't open $tacounts for reading: $!\n";
+        open ($out, ">$wiggle") or die "ERROR: Can't open $wiggle for writing: $!\n";
+        my ($lines, $neglines) = (0) x 2;
+        while (my $line = <$in>) {
+            $lines++;
+            $neglines++ if $line =~ m/^-/;
+            print $out "$line";
+        }
+        close ($in);
+        close ($out);
+        if ($neglines > 0){
+            print "ERROR: $tacounts contains $neglines negative counts out of $lines insertion sites.\n";
+            print "If you are using loess normalization, consider adjusting the span value with --span\n";
+            print "or setting --noloess. If you are not using loess normalization, check your data.\n";
+            die("STOPPING\n");
+        }
         
         qx("$cat" $ptt |"$sort" -k2 -n > genome.ptt.tmp);
         qx("mv" genome.ptt.tmp $ptt);
@@ -593,8 +631,8 @@ sub doTAcounts {
     #awful hack. plan to incorporate the removal of the - sign in the perl script below. I need to sort the file anyway.
     print "Counting number of unique insertion site flanking sequences in genome.ta after removal of non-uniques \n";
     countlines2("tavsta.txt");
-    ## Remove header, remove negative signs, and sort by position 
-    qx("$cat" tavsta.txt |"$grep" -v names|"$tr" -d '-'|"$sort" -n -k2 >tavsta.wiggle); ## I could do this in tavsta.pl, but will leave it here. Doesn't take long.
+    ## Remove header, remove negative signs, and sort by position. Added uniq to remove duplicates (i.e. left and right flanks) 
+    qx("$cat" tavsta.txt |"$grep" -v names|"$tr" -d '-'|"$sort" -n -k2 | "$uniq" >tavsta.wiggle); ## I could do this in tavsta.pl, but will leave it here. Doesn't take long.
 
     # rapidly add all ta site counts (the wiggle track of the genome) per gene, which positions are annotated in genome.ptt.    
     open (COUNTSGENE, "> $countsgene" ) or die("Can't open file: ".$countsgene."");
@@ -638,7 +676,7 @@ sub doTAcounts {
     close(COUNTSGENE);
 
     open (TARGETSESSENTIALGENES, '>>essentialgenes_targets.txt');
-    print TARGETSESSENTIALGENES "tavsgenes.txt\tcontrol\tcontrol\tinsertionsites\n";
+    print TARGETSESSENTIALGENES "tavsgenes.txt\tcontrol\tcontrol\tinsertionsites\tALL_TA\n";
     close (TARGETSESSENTIALGENES);
 }# END doTAcounts
 
