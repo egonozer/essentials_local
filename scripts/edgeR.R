@@ -49,7 +49,7 @@ if (nrow(targets) >2){
     biplot(p3, cex=1:2, col=c(40,1), main=paste('PCA Plot non normalized on',title.text, sep=" "), xlab=paste0("PC1 (",pc1var,"%)"), ylab=paste0("PC2 (",pc2var,"%)"))
     dev.off()
     png(paste(data.type,'_MDS_non_normalized.png', sep=""), width=960, height=768)
-    plotMDS(d, col=as.numeric(d$samples$group), main=paste("MDS Plot non normalized on", title.text, sep=" "))
+    plotMDS(d$counts, col=as.numeric(d$samples$group), main=paste("MDS Plot non normalized on", title.text, sep=" "))
     dev.off()
 } else {
     png(paste(data.type, '_PCA_non_normalized.png', sep=""), width=1280, height=1024)
@@ -74,7 +74,7 @@ if (nrow(targets) >2){
     biplot(p3, cex=1:2, col=c(40,1), main=paste('PCA Plot normalized on', title.text, sep=" "), xlab=paste0("PC1 (",pc1var,"%)"), ylab=paste0("PC2 (",pc2var,"%)"))
     dev.off()
     png(paste(data.type,'_MDS_normalized.png', sep=""), width=960, height=768)
-    plotMDS(d, col=as.numeric(d$samples$group), main=paste("MDS Plot normalized on", title.text, sep=" "))
+    plotMDS(d$pseudo.counts, col=as.numeric(d$samples$group), main=paste("MDS Plot normalized on", title.text, sep=" "))
     dev.off()
 } else {
     png(paste(data.type,'_PCA_normalized.png', sep=""), width=1280, height=1024)

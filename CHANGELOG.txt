@@ -1,3 +1,10 @@
+## Version 2.2.1 ##
+
+essentials.pl
+  - Fixed some typos in the screen output
+edgeR.R
+  - MDS plots now generated on counts or pseudo.counts for non-normalized and normalized plots, respectively
+
 ## Version 2.2 ##
 
 essentials.pl

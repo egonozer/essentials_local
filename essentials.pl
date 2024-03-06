@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-my $version = "2.2";
+my $version = "2.2.1";
 
 ## Simplified local version of Essentials that uses external barcode trimmer and sorter in TIS tools
 
@@ -457,7 +457,7 @@ sub pass_alignments {
         print "\n";
         countwiggle($alltacounts);
         if ($librarysize == 0){
-            print "Retaining all insertion sizte flanking sequences\n";
+            print "Retaining all insertion site flanking sequences\n";
         } else {
             print "Retaining only the $librarysize insertion site flanking sequences with the highest numbers of reads\n";
         }
@@ -598,11 +598,11 @@ sub doTAcounts {
     my $wigglepos_remember=0;
     my $wiggledepth_remember=0;
                    
-    print "\nCounting number of possible unique insertion site flanking sequences per gene\n";
+    print "\nCounting number of possible unique insertion sites per gene\n";
     #perform pass alignment command, sort command and uniq command, do some magic with sed and tr to make it tab delimited.  
 
     if ($insertion eq "TA") { 
-        print "\nCounting number of unique insertion site flanking sequences in genome.ta before removal of non-uniques \n";
+        print "\nCounting number of unique insertion sites in genome.ta before removal of non-uniques \n";
         countlines("genome.ta");
         qx("$perl" "$tavsta" genome.ta > tavsta.txt); ## replaces pass alignment. Much faster and simpler anyway. Confirmed output was the same as previous pass commands
 	}
@@ -629,7 +629,7 @@ sub doTAcounts {
 	}
 
     #awful hack. plan to incorporate the removal of the - sign in the perl script below. I need to sort the file anyway.
-    print "Counting number of unique insertion site flanking sequences in genome.ta after removal of non-uniques \n";
+    print "Counting number of unique insertion sites in genome.ta after removal of non-uniques \n";
     countlines2("tavsta.txt");
     ## Remove header, remove negative signs, and sort by position. Added uniq to remove duplicates (i.e. left and right flanks) 
     qx("$cat" tavsta.txt |"$grep" -v names|"$tr" -d '-'|"$sort" -n -k2 | "$uniq" >tavsta.wiggle); ## I could do this in tavsta.pl, but will leave it here. Doesn't take long.
